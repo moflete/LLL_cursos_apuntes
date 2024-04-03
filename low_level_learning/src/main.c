@@ -38,6 +38,9 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    if (newfile) {
+    }
+
     printf("Newfile: %d\n", newfile);
     printf("Filepath: %s\n", filepath);
 
