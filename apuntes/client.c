@@ -10,6 +10,42 @@
 #define PORT 5555 
 #define BACKLOG 0
 
+typedef enum {
+    PROTO_HELLO,
+} proto_type_e;
+
+// TLV
+typedef  struct {
+    proto_type_e type; // Type of the packet
+    unsigned short len;
+} proto_hdr_t;
+
+void handle_client(int fd) {
+    char buf[4096] = {0}; // Make room for a buffer to send through the wire.
+    proto_hdr_t *hdr = (proto_hdr_t *)buf;  // With this way, we can work with the buffer as named structure.
+    
+    read(fd, buf, sizeof(proto_hdr_t) + sizeof(int));
+
+    hdr->type = ntohl(hdr->type);
+    hdr->len  = ntohs(hdr->len);
+    // Unpack the data received
+    int *data = (int *)&hdr[1];
+    *data = ntohl(*data);
+
+    if (hdr->type != PROTO_HELLO) {
+        printf("Protocol mismatch, failing.\n");
+        return;
+    }
+
+    if (*data != 1) {
+        printf("Protocol version mismatch failing\n");
+        return;
+    }
+
+    printf("Server connected, protocol v1.\n");
+}
+
+
 int main (int argc, char *argv[]) {
     if (argc != 2){
         printf("Usage: %s <ip address of the server host\n", argv[0]);
@@ -35,7 +71,9 @@ int main (int argc, char *argv[]) {
         return 0;
     }
 
-    close(fd);
+    handle_client(fd);
     
+    close(fd);
+
     return 0;
 }
