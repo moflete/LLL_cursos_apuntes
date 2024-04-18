@@ -7,6 +7,9 @@
 #include "parse.h"
 #include "file.h"
 
+// TODO: Make remove employee by name -> '-r <name>'?
+// TODO: Make a function to update employees hours
+
 void print_usage(char *argv[]){
     printf("Usage: %s-n -f <database file>\n", argv[0]);
     printf("\t -n - create new database file \n");
@@ -18,6 +21,7 @@ int main(int argc, char *argv[]) {
     char *filepath      = NULL;
     char *portarg       = NULL;
     char *addstring     = NULL;
+    char *remove        = NUUL;
     unsigned short port = 0;
     bool newfile        = false;
     bool list           = false;
@@ -43,6 +47,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 'l':
                 list = true;
+                break;
+            case 'r':
+                remove = optarg;
                 break;
             case '?':
                 printf("Unknown option -%c\n", c);

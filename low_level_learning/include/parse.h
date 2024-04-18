@@ -1,6 +1,9 @@
 #ifndef PARSE_H
 #define PARSE_H
 
+// TODO: Make remove employee by name
+// TODO: Make a function to update employees hours
+
 #define HEADER_MAGIC 0x4c4c4144
 
 struct dbheader_t {
