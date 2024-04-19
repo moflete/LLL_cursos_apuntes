@@ -50,3 +50,9 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Database files
+*.sqlite*
+*.db
+*.db-shm
+*.db-wal
