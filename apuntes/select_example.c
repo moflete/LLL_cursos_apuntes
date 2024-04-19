@@ -75,7 +75,7 @@ int main(int argc, char const *argv[]) {
     server_addr.sin_port        = htons(PORT);
 
     /* BIND */
-    if (bind(listen_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+    if (-1 == (bind(listen_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)))) {
         perror("bind");
         close(listen_fd);
         exit(EXIT_FAILURE);
@@ -109,7 +109,7 @@ int main(int argc, char const *argv[]) {
         }
 
         // Wait for activity on one of the sockets
-        if (select(nfds, &read_fds, &write_fds, NULL, NULL) == -1) {
+        if (-1 == (select(nfds, &read_fds, &write_fds, NULL, NULL))) {
             perror("select");
             exit(EXIT_FAILURE);
         }
@@ -153,7 +153,6 @@ int main(int argc, char const *argv[]) {
                 }
             }
         }
-
     }
     return 0;
 }
