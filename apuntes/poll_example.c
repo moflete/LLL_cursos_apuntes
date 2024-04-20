@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,7 @@
 #define PORT 8080
 #define BUFF_SIZE 4096
 #define BACKLOG 10
+#define NO_TIMEOUT -1
 
 typedef enum {
     STATE_NEW          = 0,
@@ -46,25 +48,37 @@ int find_free_slot() {
     return -1;
 }
 
-int main(int argc, char const *argv[]) {
+int find_slot_by_fd(int fd) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clientStates[i].fd == fd) {
+            return i;
+        }
+    }
+    return -1;
+}
 
-    int listen_fd; // Listening socket
-    int conn_fd;   // Connection socket
-    int nfds;      // Number of file descriptors tracking
+int main(int argc, char *argv[]) {
+
+    int listen_fd;
+    int conn_fd;
     int freeSlot;
     struct sockaddr_in server_addr, client_addr;
-
     socklen_t client_len = sizeof(client_addr);
 
-    // What file descriptors are readable/writable
-    fd_set read_fds, write_fds;
+    struct pollfd fds[MAX_CLIENTS + 1];
+    int nfds = 1;
+    int opt  = 1;
 
     // Initialize client states:
     init_clients();
 
-    // Create listening socket
+    // Create listening socket yoda-style
     if (-1 == (listen_fd = socket(AF_INET, SOCK_STREAM, 0))) {
         perror("socket");
+        exit(EXIT_FAILURE);
+    }
+    if (-1 == (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)))) {
+        perror("setsockopt");
         exit(EXIT_FAILURE);
     }
 
@@ -82,7 +96,7 @@ int main(int argc, char const *argv[]) {
     }
 
     /* LISTEN */
-    if (listen(listen_fd, BACKLOG) == -1) {
+    if (-1 == (listen(listen_fd, BACKLOG))) {
         perror("listen");
         close(listen_fd);
         exit(EXIT_FAILURE);
@@ -90,33 +104,31 @@ int main(int argc, char const *argv[]) {
 
     printf("Server is listening on port %d\n", PORT);
 
+    memset(fds, 0, sizeof(fds));
+    fds[0].fd     = listen_fd;
+    fds[0].events = POLLIN;
+    nfds          = 1;
+
     while (1) {
-        // Clear FD sets
-        FD_ZERO(&read_fds);
-        FD_ZERO(&write_fds);
-
-        // Add the listening socket to the read set
-        FD_SET(listen_fd, &read_fds);
-        nfds = listen_fd + 1;
-
-        // Add Active connections to the read set
+        int ii = 1;
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if (clientStates[i].fd != -1) {
-                FD_SET(clientStates[i].fd, &read_fds);
-                if (clientStates[i].fd >= nfds)
-                    nfds = clientStates[i].fd + 1;
+                fds[ii].fd     = clientStates[i].fd;
+                fds[ii].events = POLLIN; // Offset by 1 for listen_fd
+                ii++;
             }
         }
 
-        // Wait for activity on one of the sockets
-        if (-1 == (select(nfds, &read_fds, &write_fds, NULL, NULL))) {
-            perror("select");
+        // Wait for an event on one of the sockets
+        int n_events = poll(fds, nfds, NO_TIMEOUT); // -1 means no timeout
+        if (n_events == -1) {
+            perror("poll");
             exit(EXIT_FAILURE);
         }
 
         // Check for new connections
-        if (FD_ISSET(listen_fd, &read_fds)) {
-            if ((conn_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_len)) == -1) {
+        if (fds[0].revents & POLLIN) {
+            if (-1 == (conn_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_len))) {
                 perror("accept");
                 continue;
             }
@@ -124,35 +136,43 @@ int main(int argc, char const *argv[]) {
             printf("New connection from %s:%d\n",
                    inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
-            // Find free slot
             freeSlot = find_free_slot();
             if (freeSlot == -1) {
-                printf("Server full: Closing new connection.\n");
+                printf("Server is full: Closing connection\n");
                 close(conn_fd);
             } else {
                 clientStates[freeSlot].fd    = conn_fd;
                 clientStates[freeSlot].state = STATE_CONNECTED;
+                nfds++;
+                printf("Slot %d has fd %d\n", freeSlot, clientStates[freeSlot].fd);
             }
+            n_events--; //
         }
 
-        for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clientStates[i].fd != -1 &&
-                FD_ISSET(clientStates[i].fd, &read_fds)) {
+        // Check each client for read and write activity:
+        for (int i = 0; i <= nfds && n_events > 0; i++) { // Start from 1 to skip listen_fd
+            if (fds[i].revents & POLLIN) {
+                n_events--;
 
-                ssize_t bytes_read = read(clientStates[i].fd,
-                                          &clientStates[i].buffer,
-                                          BUFF_SIZE);
-
+                int fd             = fds[i].fd;
+                int slot           = find_slot_by_fd(fd);
+                ssize_t bytes_read = read(fd, &clientStates[slot].buffer,
+                                          sizeof(clientStates[slot].buffer));
                 if (bytes_read <= 0) {
-                    close(clientStates[i].fd);
-                    clientStates[i].fd    = -1;
-                    clientStates[i].state = STATE_DISCONNECTED;
-                    printf("Client %d on port %d disconnected or error\n", i, ntohs(client_addr.sin_port));
+                    // Connection closed or error
+                    close(fd);
+                    if (-1 == slot) {
+                        printf("Tried to close an fd does doesnt exist?\n");
+                    } else {
+                        clientStates[slot].fd    = -1;
+                        clientStates[slot].state = STATE_DISCONNECTED;
+                        printf("Client disconnected or error");
+                        nfds--;
+                    }
                 } else {
-                    printf("Received data from client: %s\n", clientStates[i].buffer);
+                    printf("Received data from client: %s\n", clientStates[slot].buffer);
                 }
             }
         }
     }
-    return 0;
 }
